@@ -33,6 +33,22 @@ from settings import HERE, USER_PATH, deep_merge, load_config, load_defaults, sa
 
 SECRETS_PATH = HERE / ".streamlit" / "secrets.toml"  # git-ignored
 
+
+def _flag(name: str) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        try:
+            value = st.secrets.get(name)
+        except Exception:  # no secrets.toml
+            value = None
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+# Public deployment (PUBLIC_MODE = true in the host's secrets / env): the server
+# is shared by every visitor, so nothing per-user is stored or prefilled on it -
+# no server-side password, no "remember", no server-side "Save settings".
+PUBLIC_MODE = _flag("PUBLIC_MODE")
+
 st.set_page_config(page_title="ImportPO / ImportSKU Generator", layout="wide")
 
 LABELS = {
@@ -109,7 +125,12 @@ def _widget(section: str, key: str, value):
 
 
 def _stored_password() -> str:
-    """SSA_PASSWORD from the environment, Streamlit secrets, or our secrets file."""
+    """SSA_PASSWORD from the environment, Streamlit secrets, or our secrets file.
+
+    Never used in PUBLIC_MODE - a stored password would be handed to every visitor.
+    """
+    if PUBLIC_MODE:
+        return ""
     if os.environ.get("SSA_PASSWORD"):
         return os.environ["SSA_PASSWORD"]
     try:
@@ -127,8 +148,11 @@ def _stored_password() -> str:
 def _password_input() -> str:
     password = st.text_input(
         "SSA password (both payloads)", value=_stored_password(), type="password", key="ssa_password",
-        help="Used as SSA_Password in ImportPO and ImportSKU. Never written to config.json.",
+        help="Used as SSA_Password in ImportPO and ImportSKU. Never written to config.json."
+        + (" Kept only for your browser session." if PUBLIC_MODE else ""),
     )
+    if PUBLIC_MODE:
+        return password
     remember = st.checkbox(
         "Remember on this computer", value=SECRETS_PATH.exists(), key="ssa_remember",
         help=f"Saves the password to {SECRETS_PATH.relative_to(HERE)} (ignored by git). Untick to forget it.",
@@ -161,7 +185,9 @@ def settings_sidebar() -> tuple[dict, str]:
             cfg["excel_columns"][field] = [a.strip() for a in raw.splitlines() if a.strip()]
 
     c1, c2 = st.sidebar.columns(2)
-    if c1.button("💾 Save settings", use_container_width=True):
+    if PUBLIC_MODE:
+        c1.caption("Keep your settings with *Download settings* and load them next time.")
+    elif c1.button("💾 Save settings", use_container_width=True):
         save_config(cfg)
         st.session_state.base_cfg = cfg
         st.sidebar.success(f"Saved to {USER_PATH.name}")

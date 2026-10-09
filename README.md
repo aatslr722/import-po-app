@@ -17,6 +17,19 @@ python -m venv .venv
 Tests: `.venv/Scripts/python -m pytest -q`. The PDF tests skip if the sample
 POs aren't in `tests/fixtures/`.
 
+## Public deployment (Streamlit Community Cloud)
+
+1. On share.streamlit.io, choose **Create app**: repo `aatslr722/import-po-app`,
+   branch `main`, main file `app.py`.
+2. Under **Advanced settings → Secrets**, add only `PUBLIC_MODE = true`.
+   **Do not** add `SSA_PASSWORD`: on a public URL it would be filled in for, and
+   downloadable by, every visitor.
+3. After it deploys, open **Share** and set the app to public.
+
+In public mode each visitor types the SSA password for their own session.
+Nothing per-user is stored on the server, and settings are kept by downloading
+and uploading the settings JSON.
+
 ## Settings
 
 Defaults live in `default_config.json`. Change them in the sidebar, then
