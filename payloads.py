@@ -6,7 +6,10 @@ Shared variables (config["common"]) feed both payloads:
     facility, storer_key     -> DataHeader.Facility / DataHeader.StorerKey (both)
     ssa_login                -> SSA.SSA_Login (both)
     requested_system         -> ApplicationHeader.RequestedSystem (both)
-    lottable_validation_key  -> ImportSKU DataHeader.LottableValidationKey
+    lottable_validation_key  -> ImportSKU DataHeader[].LottableValidationKey
+
+ImportSKU carries many SKUs per payload (DataHeader is a list); fields that
+don't apply are left out.
 """
 
 from __future__ import annotations
@@ -423,94 +426,87 @@ def build_po_payloads(
 
 
 # ───────────────────────── ImportSKU ─────────────────────────
-def build_sku_payload(ln: POLine, cfg: dict, password: str, txn_id: str, requested_date: str) -> dict:
+# Every field an ImportSKU DataHeader entry can carry, in the order the API
+# documents them; settings["sku_payload"]["fields"] picks which are sent.
+def _sku_field_values(ln: POLine, cfg: dict) -> dict:
     common, scfg = cfg["common"], cfg["sku_payload"]
     desc = ln.description
     if scfg["description_max_length"]:
-        desc = desc[: int(scfg["description_max_length"])]
-    data_header = {
-        "Facility": common["facility"],
-        "StorerKey": common["storer_key"],
-        "SKU": ln.item_number,
+        desc = desc[: int(scfg["description_max_length"])].rstrip()
+    return {
         "Description": desc,
-        "HSCode": "",
-        "UPC": "",
-        "UPC_UOM": None,
-        "SerialCount": 0,
-        "SerialLength": 0,
+        "Facility": common["facility"],
+        "SKU": ln.item_number,
+        "SerialCount": str(scfg["serial_count"]),
+        "StorerKey": common["storer_key"],
+        "LottableValidationKey": common["lottable_validation_key"],
+        "ManufacturerSKU": ln.item_number,
         "SUSR2": ln.description[: int(scfg["susr2_length"])].rstrip(),
         "SUSR3": scfg["susr3"],
-        "SUSR4": "",
-        "SUSR5": "",
-        "SUSR6": "",
-        "SUSR7": "",
-        "SUSR8": "",
         "SUSR9": ln.uom,
-        "SUSR10": "",
-        "ManufacturerSKU": ln.item_number,
-        "LottableValidationKey": common["lottable_validation_key"],
-        "BillingGroup": "",
-        "STDCube": 0.0,
-        "STDWGT": 0.0,
-        "STDGross": 0.0,
-        "InnerPack": 0,
         "Cost": float(ln.unit_price),
         "Price": float(scfg["price"]),
-        "Packs": None,
-        "BOMs": None,
-        "ITEMCHARACTERISTIC1": "",
-        "ITEMCHARACTERISTIC2": "",
-        "COUNTRYOFORIGIN": "",
-        "COLLECTION": "",
-        "THEME": "",
-        "SEASON": "",
-        "STYLE": "",
-        "COLOR": "",
-        "SKUSIZE": "",
-        "CAMPAIGNSTART": "",
-        "CAMPAIGNEND": "",
-        "TOEXPIREDAYS": 0,
-        "TODELIVERBYDAYS": 0,
-        "TOBESTBYDAYS": 0,
         "SHELFLIFEINDICATOR": scfg["shelf_life_indicator"],
         "SHELFLIFECODETYPE": scfg["shelf_life_code_type"],
-        "SHELFLIFEONRECEIVING": 0,
-        "SHELFLIFE": 0,
-        "Reorderpoint": None,
-        "Imgurl": None,
-        "UserDate": None,
     }
-    data_header.update(scfg.get("data_header_overrides") or {})
-    return {
-        "SSA": {"SSA_Login": common["ssa_login"], "SSA_Password": password, "SSA_Token": None},
-        "ApplicationHeader": {
-            "RequestedSystem": common["requested_system"],
-            "RequestedDate": requested_date,
-            "TransactionID": txn_id,
-        },
-        "DataHeader": data_header,
-        "UserDate": None,
-    }
+
+
+SKU_FIELDS = [
+    "Description", "Facility", "SKU", "SerialCount", "StorerKey", "LottableValidationKey",
+    "ManufacturerSKU", "SUSR2", "SUSR3", "SUSR9", "Cost", "Price", "SHELFLIFEINDICATOR", "SHELFLIFECODETYPE",
+]
+DEFAULT_SKU_FIELDS = ["Description", "Facility", "SKU", "SerialCount", "StorerKey", "LottableValidationKey"]
+
+
+def build_sku_entry(ln: POLine, cfg: dict) -> dict:
+    """One DataHeader entry. Fields that don't apply (empty / null) are dropped."""
+    scfg = cfg["sku_payload"]
+    values = _sku_field_values(ln, cfg)
+    entry = {f: values[f] for f in scfg.get("fields") or DEFAULT_SKU_FIELDS if f in values}
+    entry.update(scfg.get("data_header_overrides") or {})
+    return {k: v for k, v in entry.items() if v is not None and v != ""}
 
 
 def build_sku_payloads(
     orders: list[PurchaseOrder], cfg: dict, password: str, now: datetime | None = None,
     txn_ids: TransactionIds | None = None,
 ) -> tuple[list[tuple[str, dict]], list[str]]:
-    """One payload per PO line (or per distinct SKU). Returns (payloads, notes)."""
-    scfg = cfg["sku_payload"]
+    """ImportSKU payload(s): many SKUs per payload, in the DataHeader list.
+
+    All distinct SKUs of the uploaded POs go into one payload, or into batches
+    of `skus_per_payload` when that is set. Returns ([(label, payload)], notes).
+    """
+    common, scfg = cfg["common"], cfg["sku_payload"]
     requested_date = (now or datetime.now()).strftime(scfg["requested_date_format"])
     txn_ids = txn_ids or TransactionIds()
-    out, notes, seen = [], [], set()
+
+    entries, notes, seen = [], [], set()
     for po in orders:
         for ln in po.lines:
             if not ln.item_number:
                 notes.append(f"PO {po.po_number} line {ln.line_number}: skipped (no Item No)")
                 continue
-            if scfg["one_payload_per_sku"] and ln.item_number in seen:
+            if scfg["unique_skus"] and ln.item_number in seen:
                 continue
             seen.add(ln.item_number)
-            out.append((ln.item_number, build_sku_payload(ln, cfg, password, txn_ids.next(), requested_date)))
+            entries.append(build_sku_entry(ln, cfg))
+    if not entries:
+        return [], notes
+
+    size = int(scfg.get("skus_per_payload") or 0) or len(entries)
+    batches = [entries[i: i + size] for i in range(0, len(entries), size)]
+    out = []
+    for n, batch in enumerate(batches, start=1):
+        label = f"{len(batch)} SKUs" if len(batches) == 1 else f"Batch {n} of {len(batches)} ({len(batch)} SKUs)"
+        out.append((label, {
+            "ApplicationHeader": {
+                "RequestedDate": requested_date,
+                "RequestedSystem": common["requested_system"],
+                "TransactionID": txn_ids.next(),
+            },
+            "DataHeader": batch,
+            "SSA": {"SSA_Login": common["ssa_login"], "SSA_Password": password},
+        }))
     return out, notes
 
 
@@ -540,6 +536,7 @@ def build_zip(po_payloads: list[tuple[str, dict]], sku_payloads: list[tuple[str,
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for po_number, p in po_payloads:
             zf.writestr(unique(f"ImportPO/PO_{_safe(po_number)}.json"), to_json(p))
-        for sku, p in sku_payloads:
-            zf.writestr(unique(f"ImportSKU/SKU_{_safe(sku)}.json"), to_json(p))
+        for n, (_, p) in enumerate(sku_payloads, start=1):
+            name = "ImportSKU.json" if len(sku_payloads) == 1 else f"ImportSKU_batch_{n:03d}.json"
+            zf.writestr(unique(f"ImportSKU/{name}"), to_json(p))
     return buf.getvalue()

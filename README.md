@@ -4,7 +4,7 @@ Drop Oracle "Standard Purchase Order" PDFs (or the Excel/CSV PO-line export) and
 download a ZIP with:
 
 - `ImportPO/PO_<po>.json`, one SSA ImportPO payload per purchase order
-- `ImportSKU/SKU_<sku>.json`, one SSA ImportSKU payload per distinct item on the PO lines
+- `ImportSKU/ImportSKU.json`, one SSA ImportSKU payload listing every distinct item on the PO lines
 
 ## Run
 
@@ -105,9 +105,26 @@ run.
 
 ## ImportSKU mapping
 
-`SKU` and `ManufacturerSKU` ← Item No, `Description` ← line description,
-`SUSR2` ← first 18 characters of the description, `SUSR9` ← UOM,
-`Cost` ← unit price. Everything else comes from settings.
+One ImportSKU payload carries every distinct SKU of the uploaded POs in its
+`DataHeader` list. Set `skus_per_payload` to split them into batches.
+
+```json
+{
+  "ApplicationHeader": {"RequestedDate": "2026-10-09", "RequestedSystem": "ADES_ORACLE", "TransactionID": "37719259"},
+  "DataHeader": [
+    {"Description": "...", "Facility": "WMWHSE3", "SKU": "5060700.01.11.02032",
+     "SerialCount": "0", "StorerKey": "ADES_GSO", "LottableValidationKey": "060000"}
+  ],
+  "SSA": {"SSA_Login": "wsades", "SSA_Password": ""}
+}
+```
+
+Each entry sends the fields picked in *ImportSKU payload → fields*. The
+default is `Description, Facility, SKU, SerialCount, StorerKey,
+LottableValidationKey`. Optional fields are `ManufacturerSKU` (Item No),
+`SUSR2` (first 18 characters of the description), `SUSR3`, `SUSR9` (UOM),
+`Cost` (unit price), `Price`, `SHELFLIFEINDICATOR` and `SHELFLIFECODETYPE`.
+Empty or null values are always left out.
 
 Lines with no printed Item No get a placeholder SKU, `{po}-{line}--NOSKU` by
 default (e.g. `107439-3--NOSKU`). It's used identically as ImportPO

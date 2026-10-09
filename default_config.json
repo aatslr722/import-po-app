@@ -26,14 +26,24 @@
   },
   "sku_payload": {
     "enabled": true,
-    "requested_date_format": "%m-%d-%Y",
+    "requested_date_format": "%Y-%m-%d",
+    "fields": [
+      "Description",
+      "Facility",
+      "SKU",
+      "SerialCount",
+      "StorerKey",
+      "LottableValidationKey"
+    ],
+    "skus_per_payload": 0,
+    "unique_skus": true,
+    "serial_count": "0",
     "description_max_length": 0,
     "susr2_length": 18,
     "susr3": "",
     "price": 0.01,
     "shelf_life_indicator": "N",
     "shelf_life_code_type": "E",
-    "one_payload_per_sku": true,
     "data_header_overrides": {}
   },
   "parsing": {

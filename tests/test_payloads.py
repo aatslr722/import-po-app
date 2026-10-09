@@ -42,19 +42,17 @@ def po_payload(po, cfg, password="", now=None):
     [(_, payload)] = build_po_payloads([po], cfg, password, now=now)
     return payload
 
-# Key order of the ImportSKU sample the user supplied.
-SAMPLE_SKU = {
-    "SSA": {"SSA_Login": "wsades", "SSA_Password": "************", "SSA_Token": None},
-    "ApplicationHeader": {"RequestedSystem": "ADES_ORACLE", "RequestedDate": "10-08-2026", "TransactionID": "46286217"},
-    "DataHeader": dict.fromkeys(
-        "Facility StorerKey SKU Description HSCode UPC UPC_UOM SerialCount SerialLength SUSR2 SUSR3 SUSR4 SUSR5 "
-        "SUSR6 SUSR7 SUSR8 SUSR9 SUSR10 ManufacturerSKU LottableValidationKey BillingGroup STDCube STDWGT STDGross "
-        "InnerPack Cost Price Packs BOMs ITEMCHARACTERISTIC1 ITEMCHARACTERISTIC2 COUNTRYOFORIGIN COLLECTION THEME "
-        "SEASON STYLE COLOR SKUSIZE CAMPAIGNSTART CAMPAIGNEND TOEXPIREDAYS TODELIVERBYDAYS TOBESTBYDAYS "
-        "SHELFLIFEINDICATOR SHELFLIFECODETYPE SHELFLIFEONRECEIVING SHELFLIFE Reorderpoint Imgurl UserDate".split()
-    ),
-    "UserDate": None,
+# ImportSKU sample the user supplied: many SKUs per payload, minimal fields.
+SAMPLE_SKU_KEYS = {
+    "top": ["ApplicationHeader", "DataHeader", "SSA"],
+    "ApplicationHeader": ["RequestedDate", "RequestedSystem", "TransactionID"],
+    "entry": ["Description", "Facility", "SKU", "SerialCount", "StorerKey", "LottableValidationKey"],
+    "SSA": ["SSA_Login", "SSA_Password"],
 }
+
+
+def sku_entries(payloads):
+    return [e for _, p in payloads for e in p["DataHeader"]]
 
 
 def sample_line():
@@ -69,21 +67,48 @@ def sample_line():
 
 
 def test_sku_payload_matches_sample_shape_and_values(cfg):
-    po = PurchaseOrder(po_number="1", lines=[sample_line()])
-    [(sku, p)], notes = build_sku_payloads([po], cfg, "secret", now=datetime(2026, 10, 8))
-    assert list(p) == list(SAMPLE_SKU)
-    assert list(p["DataHeader"]) == list(SAMPLE_SKU["DataHeader"])
-    assert p["SSA"] == {"SSA_Login": "wsades", "SSA_Password": "secret", "SSA_Token": None}
-    assert p["ApplicationHeader"]["RequestedDate"] == "10-08-2026"
+    other = sample_line()
+    other.line_number, other.item_number, other.description = "2", "5060400.01.11.06071", "SERVICE KIT"
+    po = PurchaseOrder(po_number="1", lines=[sample_line(), other])
+    [(label, p)], notes = build_sku_payloads([po], cfg, "secret", now=datetime(2020, 3, 24))
+    assert label == "2 SKUs" and notes == []
+    assert list(p) == SAMPLE_SKU_KEYS["top"]
+    assert list(p["ApplicationHeader"]) == SAMPLE_SKU_KEYS["ApplicationHeader"]
+    assert list(p["SSA"]) == SAMPLE_SKU_KEYS["SSA"]
+    assert p["SSA"] == {"SSA_Login": "wsades", "SSA_Password": "secret"}
+    assert p["ApplicationHeader"]["RequestedDate"] == "2020-03-24"
     assert p["ApplicationHeader"]["RequestedSystem"] == "ADES_ORACLE"
-    dh = p["DataHeader"]
-    assert (dh["Facility"], dh["StorerKey"], dh["LottableValidationKey"]) == ("WMWHSE3", "ADES_GSO", "060000")
-    assert dh["SKU"] == dh["ManufacturerSKU"] == sku == "5061100.01.11.01082"
-    assert dh["SUSR2"] == "STEERING ROTARY WI"
-    assert dh["SUSR3"] == ""
-    assert dh["SUSR9"] == "EACH"
-    assert (dh["Cost"], dh["Price"]) == (1200.0, 0.01)
-    assert (dh["SHELFLIFEINDICATOR"], dh["SHELFLIFECODETYPE"]) == ("N", "E")
+    assert [list(e) for e in p["DataHeader"]] == [SAMPLE_SKU_KEYS["entry"]] * 2
+    first = p["DataHeader"][0]
+    assert first == {
+        "Description": "STEERING ROTARY WITH CABLE FOR NPT75F   MFG JIANGYIN NEPTUNE MARINE APPL   P/N STEERING- NPT75F",
+        "Facility": "WMWHSE3",
+        "SKU": "5061100.01.11.01082",
+        "SerialCount": "0",
+        "StorerKey": "ADES_GSO",
+        "LottableValidationKey": "060000",
+    }
+    assert p["DataHeader"][1]["SKU"] == "5060400.01.11.06071"
+
+
+def test_optional_sku_fields_and_empty_values_dropped(cfg):
+    cfg["sku_payload"]["fields"] = ["SKU", "SUSR2", "SUSR3", "SUSR9", "Cost", "Price", "ManufacturerSKU"]
+    po = PurchaseOrder(po_number="1", lines=[sample_line()])
+    [(_, p)], _ = build_sku_payloads([po], cfg, "")
+    # SUSR3 is blank by default -> not applicable -> left out
+    assert p["DataHeader"][0] == {
+        "SKU": "5061100.01.11.01082", "SUSR2": "STEERING ROTARY WI", "SUSR9": "EACH",
+        "Cost": 1200.0, "Price": 0.01, "ManufacturerSKU": "5061100.01.11.01082",
+    }
+
+
+def test_skus_per_payload_batches(po_36690, cfg):
+    cfg["sku_payload"]["skus_per_payload"] = 50
+    payloads, _ = build_sku_payloads([po_36690], cfg, "")
+    assert [len(p["DataHeader"]) for _, p in payloads] == [50, 50, 25]
+    assert payloads[0][0] == "Batch 1 of 3 (50 SKUs)"
+    ids = [p["ApplicationHeader"]["TransactionID"] for _, p in payloads]
+    assert len(set(ids)) == 3
 
 
 def test_common_variables_feed_both_payloads(cfg):
@@ -92,11 +117,12 @@ def test_common_variables_feed_both_payloads(cfg):
     cfg["common"].update(ssa_login="someone", requested_system="SYS_X")
     p = po_payload(po, cfg)
     [(_, sku_payload)], _ = build_sku_payloads([po], cfg, "")
-    assert p["DataHeader"]["Facility"] == sku_payload["DataHeader"]["Facility"] == "WMWHSE9"
-    assert p["DataHeader"]["StorerKey"] == sku_payload["DataHeader"]["StorerKey"] == "STORER_X"
+    entry = sku_payload["DataHeader"][0]
+    assert p["DataHeader"]["Facility"] == entry["Facility"] == "WMWHSE9"
+    assert p["DataHeader"]["StorerKey"] == entry["StorerKey"] == "STORER_X"
     assert p["SSA"]["SSA_Login"] == sku_payload["SSA"]["SSA_Login"] == "someone"
     assert p["ApplicationHeader"]["RequestedSystem"] == sku_payload["ApplicationHeader"]["RequestedSystem"] == "SYS_X"
-    assert sku_payload["DataHeader"]["LottableValidationKey"] == "999999"
+    assert entry["LottableValidationKey"] == "999999"
 
 
 def test_transaction_ids_unique_8_digit():
@@ -106,14 +132,15 @@ def test_transaction_ids_unique_8_digit():
     assert all(len(t) == 8 and t.isdigit() for t in got)
 
 
-def test_one_payload_per_sku_and_skip_missing(po_36690, po_107439, cfg):
+def test_all_skus_in_one_payload_each_once(po_36690, po_107439, cfg):
     payloads, notes = build_sku_payloads([po_36690, po_107439], cfg, "")
-    skus = [s for s, _ in payloads]
-    assert len(skus) == len(set(skus)) == len({ln.item_number for ln in po_36690.lines})
-    assert len(notes) == 5  # every line of 107439 lacks an Item No
-    cfg["sku_payload"]["one_payload_per_sku"] = False
+    assert len(payloads) == 1
+    skus = [e["SKU"] for e in sku_entries(payloads)]
+    assert len(skus) == len(set(skus)) == len({ln.item_number for ln in po_36690.lines}) == 125
+    assert len(notes) == 5  # every line of 107439 lacks an Item No (no placeholder policy applied here)
+    cfg["sku_payload"]["unique_skus"] = False
     payloads, _ = build_sku_payloads([po_36690], cfg, "")
-    assert len(payloads) == 131
+    assert len(sku_entries(payloads)) == 131
 
 
 def test_missing_item_policy_description_prefix(po_107439):
@@ -129,12 +156,9 @@ def test_placeholder_sku_is_identical_in_po_and_sku_payloads(po_107439, cfg):
     po_skus = [ln["SKU"] for ln in po_payload(po, cfg)["DataLines"]]
     sku_payloads, notes = build_sku_payloads([po], cfg, "")
     assert po_skus == expected
-    assert [s for s, _ in sku_payloads] == expected
-    assert [p["DataHeader"]["SKU"] for _, p in sku_payloads] == expected
-    assert [p["DataHeader"]["ManufacturerSKU"] for _, p in sku_payloads] == expected
+    assert [e["SKU"] for e in sku_entries(sku_payloads)] == expected
     assert notes == []
-    # lines that do have an Item No are untouched
-    assert sku_payloads[0][1]["DataHeader"]["Description"].startswith("150-576-D-NPN")
+    assert sku_entries(sku_payloads)[0]["Description"].startswith("150-576-D-NPN")
 
 
 def test_placeholder_pattern_is_configurable(po_107439):
@@ -149,7 +173,7 @@ def test_placeholders_from_different_pos_do_not_collide(po_107439, cfg):
     pos = [copy.deepcopy(po_107439), other]
     apply_missing_item_policy(pos, "placeholder", cfg["parsing"]["missing_item_placeholder"])
     sku_payloads, _ = build_sku_payloads(pos, cfg, "")
-    assert len(sku_payloads) == 10
+    assert len(sku_entries(sku_payloads)) == 10
 
 
 def test_placeholder_leaves_real_item_numbers_alone(po_36690, cfg):
@@ -287,9 +311,11 @@ def test_payloads_built_from_cleaned_data(cfg):
     po = _dirty_po()
     prepare_orders([po], cfg)
     [(_, p)] = build_po_payloads([po], cfg, "P@ss#1&")
+    cfg["sku_payload"]["fields"] = ["Description", "SKU", "SUSR2"]
     [(_, sku)], _ = build_sku_payloads([po], cfg, "P@ss#1&")
-    assert p["DataLines"][0]["Descr"] == sku["DataHeader"]["Description"] == "GRIP 5-3/4 2 SS X cafe b"
-    assert sku["DataHeader"]["SUSR2"] == "GRIP 5-3/4 2 SS X"  # 18 chars of the cleaned text
+    entry = sku["DataHeader"][0]
+    assert p["DataLines"][0]["Descr"] == entry["Description"] == "GRIP 5-3/4 2 SS X cafe b"
+    assert entry["SUSR2"] == "GRIP 5-3/4 2 SS X"  # 18 chars of the cleaned text
     assert p["DataHeader"]["Notes"] == "PR. 36135 co 100"
     assert p["ExtraAddresses"][0]["Postal"] == "61010"
     assert p["ExtraAddresses"][0]["Address1"] == "Block 8, Plot 144"
@@ -319,7 +345,7 @@ def test_transaction_ids_unique_across_po_and_sku(po_36690, cfg):
     pos = build_po_payloads([po_36690], cfg, "", txn_ids=ids)
     skus, _ = build_sku_payloads([po_36690], cfg, "", txn_ids=ids)
     all_ids = [p["ApplicationHeader"]["TransactionID"] for _, p in pos + skus]
-    assert len(all_ids) == len(set(all_ids)) == 1 + len(skus)
+    assert len(all_ids) == len(set(all_ids)) == 2  # 1 ImportPO + 1 ImportSKU (all SKUs)
 
 
 def test_po_overrides(po_36690, cfg):
@@ -337,6 +363,6 @@ def test_zip_layout(po_36690, cfg):
     data = build_zip(build_po_payloads([po_36690], cfg, ""), skus)
     names = zipfile.ZipFile(io.BytesIO(data)).namelist()
     assert "ImportPO/PO_36690.json" in names
-    assert "ImportSKU/SKU_5060700.01.11.02032.json" in names
+    assert names == ["ImportPO/PO_36690.json", "ImportSKU/ImportSKU.json"]
     for n in names:
         json.loads(zipfile.ZipFile(io.BytesIO(data)).read(n))

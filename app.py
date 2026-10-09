@@ -21,6 +21,7 @@ import streamlit.components.v1 as components
 from excel_source import parse_po_table, read_table
 from payloads import (
     MISSING_ITEM_MODES,
+    SKU_FIELDS,
     TransactionIds,
     build_po_payloads,
     build_sku_payloads,
@@ -83,7 +84,10 @@ LABELS = {
     "price": "Price",
     "shelf_life_indicator": "SHELFLIFEINDICATOR",
     "shelf_life_code_type": "SHELFLIFECODETYPE",
-    "one_payload_per_sku": "One payload per distinct SKU (else one per PO line)",
+    "fields": "ImportSKU fields to send (empty values are always left out)",
+    "skus_per_payload": "SKUs per ImportSKU payload (0 = all in one)",
+    "unique_skus": "List each SKU once (else once per PO line)",
+    "serial_count": "SerialCount",
     "data_header_overrides": "Fixed values for any DataHeader field (JSON)",
     "missing_item_number": "When a PO line has no Item No",
     "missing_item_placeholder": "Placeholder SKU pattern ({line}, {po})",
@@ -105,6 +109,8 @@ def _widget(section: str, key: str, value):
             label, MISSING_ITEM_MODES, index=MISSING_ITEM_MODES.index(value),
             format_func=lambda m: MISSING_ITEM_HELP[m], key=wkey,
         )
+    if key == "fields":
+        return st.multiselect(label, SKU_FIELDS, default=[f for f in value if f in SKU_FIELDS], key=wkey)
     if isinstance(value, bool):
         return st.checkbox(label, value, key=wkey)
     if isinstance(value, int):
@@ -322,7 +328,7 @@ with st.expander("Parsed line items"):
 
 c1, c2, c3 = st.columns(3)
 c1.metric("ImportPO payloads", len(po_payloads))
-c2.metric("ImportSKU payloads", len(sku_payloads))
+c2.metric("SKUs in ImportSKU", sum(len(p["DataHeader"]) for _, p in sku_payloads))
 c3.metric("Lines without SKU payload", len(sku_notes))
 if not password:
     st.warning("SSA password is empty – enter it under 'Shared variables' in the sidebar.")
@@ -375,7 +381,7 @@ kinds = ["ImportPO"] + (["ImportSKU"] if sku_payloads else [])
 kind = st.radio("Payload type", kinds, horizontal=True, key="view_kind")
 items = po_payloads if kind == "ImportPO" else sku_payloads
 idx = st.selectbox(
-    "PO number" if kind == "ImportPO" else "SKU",
+    "PO number" if kind == "ImportPO" else "ImportSKU payload",
     range(len(items)),
     format_func=lambda i: items[i][0],
     key=f"view_{kind}",
@@ -391,7 +397,7 @@ with b1:
 with b2:
     st.download_button(
         "⬇️ Download this payload", text,
-        file_name=f"{'PO' if kind == 'ImportPO' else 'SKU'}_{items[idx][0]}.json",
+        file_name=f"PO_{items[idx][0]}.json" if kind == "ImportPO" else f"ImportSKU_{idx + 1}.json",
         mime="application/json", key="dl_one",
     )
 st.code(text, language="json")
