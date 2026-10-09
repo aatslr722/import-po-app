@@ -1,0 +1,166 @@
+{
+  "common": {
+    "facility": "WMWHSE3",
+    "storer_key": "ADES_GSO",
+    "lottable_validation_key": "060000",
+    "ssa_login": "wsades",
+    "requested_system": "ADES_ORACLE",
+    "remove_special_characters": true,
+    "allowed_special_characters": " .,-/():"
+  },
+  "po_payload": {
+    "requested_date_format": "%d/%m/%Y",
+    "type": "STANDARD",
+    "company_name": "ADVANCED ENERGY SYSTEM ADES",
+    "conversion_factor": "1",
+    "amount_format": "{:,.2f}",
+    "manufacturer_sku_template": "P/N:{pn}",
+    "extra_address_serial_key": 9999999999,
+    "address_line_max_length": 50,
+    "remove_duplicate_lines": true,
+    "data_header_overrides": {},
+    "buyer_address_overrides": {},
+    "data_line_overrides": {},
+    "bill_to_overrides": {},
+    "ship_to_overrides": {}
+  },
+  "sku_payload": {
+    "enabled": true,
+    "requested_date_format": "%m-%d-%Y",
+    "description_max_length": 0,
+    "susr2_length": 18,
+    "susr3": "",
+    "price": 0.01,
+    "shelf_life_indicator": "N",
+    "shelf_life_code_type": "E",
+    "one_payload_per_sku": true,
+    "data_header_overrides": {}
+  },
+  "parsing": {
+    "missing_item_number": "placeholder",
+    "missing_item_placeholder": "{po}-{line}--NOSKU",
+    "excel_dayfirst": false
+  },
+  "excel_columns": {
+    "po_number": [
+      "Purchase Order Number",
+      "PO Number",
+      "SEGMENT1"
+    ],
+    "order_date": [
+      "Purchase Order Date",
+      "PO Date",
+      "PO_HEADER_CREATION_DATE"
+    ],
+    "order_type": [
+      "EMS Unit Level 1 Name",
+      "EMS Unit"
+    ],
+    "po_description": [
+      "PO Description",
+      "COMMENTS"
+    ],
+    "buyer": [
+      "Buyer Code",
+      "Buyer"
+    ],
+    "currency": [
+      "Currency",
+      "CURRENCY_CODE"
+    ],
+    "supplier_number": [
+      "Supplier Number",
+      "VENDOR_ID"
+    ],
+    "supplier_name": [
+      "Alternate Supplier Name",
+      "Supplier Name"
+    ],
+    "supplier_address1": [
+      "Supplier Address1"
+    ],
+    "supplier_address2": [
+      "Supplier Address2"
+    ],
+    "supplier_city": [
+      "Supplier City",
+      "City"
+    ],
+    "supplier_postal_code": [
+      "Supplier Postal Code",
+      "Postal Code"
+    ],
+    "supplier_country": [
+      "Supplier Country",
+      "Country"
+    ],
+    "ship_to_country": [
+      "Country of Ship To",
+      "Ship To Country"
+    ],
+    "incoterm": [
+      "Header Incoterms",
+      "Incoterms"
+    ],
+    "payment_terms": [
+      "Payment Terms"
+    ],
+    "line_number": [
+      "PO Line Number",
+      "Line",
+      "LINE_NUM"
+    ],
+    "item_number": [
+      "Part Number",
+      "Item Number",
+      "ITEM_CODE"
+    ],
+    "supplier_item": [
+      "Supplier Item",
+      "Supplier Part Number"
+    ],
+    "line_description": [
+      "Part Description",
+      "Description",
+      "ITEM_DESCRIPTION"
+    ],
+    "quantity": [
+      "Order Quantity",
+      "LINE_QTY"
+    ],
+    "open_quantity": [
+      "Open Quantity"
+    ],
+    "uom": [
+      "UOM",
+      "Unit",
+      "UNIT_MEAS_LOOKUP_CODE"
+    ],
+    "unit_price": [
+      "Item Unit Cost",
+      "Unit Cost",
+      "UNIT_PRICE"
+    ],
+    "promise_date": [
+      "Purchase Due Date",
+      "Due Date",
+      "PROMISED_DATE"
+    ],
+    "need_by_date": [
+      "Purchase Need/Ship Date",
+      "Need Date",
+      "Need/Ship Date",
+      "NEED_BY_DATE"
+    ],
+    "delivery_location": [
+      "Rig",
+      "Rig No",
+      "Location",
+      "Ship To Location"
+    ],
+    "notes": [
+      "Notes",
+      "NOTE_TO_VENDOR"
+    ]
+  }
+}
